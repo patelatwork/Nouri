@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap");
+
+:root {
+  --background: #0a0a0f;
+  --surface: #12121a;
+  --accent: #7c3aed;
+  --secondary: #0d9488;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a3a transparent;
+}
+
+body {
+  background-color: var(--background);
+  color: #e5e7eb;
+  font-family: "Inter", system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Glassmorphism */
+.glass {
+  background: rgba(18, 18, 26, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(124, 58, 237, 0.15);
+}
+
+.glass-strong {
+  background: rgba(18, 18, 26, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+}
+
+/* Snap scroll for feed */
+.feed-scroll {
+  scroll-snap-type: y mandatory;
+  overflow-y: scroll;
+  height: 100vh;
+}
+
+.feed-scroll > * {
+  scroll-snap-align: start;
+}
+
+/* Wellbeing glow borders */
+.wellbeing-beneficial {
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4), inset 0 0 12px rgba(16, 185, 129, 0.05);
+}
+
+.wellbeing-neutral {
+  box-shadow: 0 0 8px rgba(107, 114, 128, 0.3);
+}
+
+.wellbeing-harmful {
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.5), inset 0 0 16px rgba(239, 68, 68, 0.05);
+  animation: pulse-red 2s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(239, 68, 68, 0.7);
+  }
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-accent hover:bg-accent-light text-white font-medium px-6 py-2.5 rounded-xl transition-all duration-200;
+}
+
+.btn-secondary {
+  @apply bg-surface-light hover:bg-surface text-gray-200 font-medium px-6 py-2.5 rounded-xl border border-gray-700 transition-all duration-200;
+}
+
+.btn-ghost {
+  @apply text-gray-400 hover:text-white hover:bg-surface-light px-4 py-2 rounded-lg transition-all duration-200;
+}
