@@ -67,8 +67,8 @@ async def get_wellbeing_stats(
     ]
 
     # Diversity score (from recent feed interactions)
-    cat_result = await db.execute(
-        select(Post.category)
+    cat_creator_result = await db.execute(
+        select(Post.category, Post.creator_id)
         .join(Interaction, Interaction.post_id == Post.id)
         .where(
             Interaction.user_id == user.id,
@@ -76,10 +76,11 @@ async def get_wellbeing_stats(
             Interaction.created_at >= week_ago,
         )
     )
-    cats = [r[0] for r in cat_result.all()]
-    unique_cats = len(set(cats))
-    total = max(len(cats), 1)
-    diversity_score = round(min(100, (unique_cats / total) * 100 * 2), 1)
+    rows = cat_creator_result.all()
+    cats = [r[0] for r in rows]
+    creators = [str(r[1]) for r in rows]
+    from services.diversity_ranker import compute_diversity_score
+    diversity_score = compute_diversity_score(cats, creators)
 
     return WellbeingStatsOut(
         screen_time_weekly=screen_time_weekly,

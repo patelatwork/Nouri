@@ -5,9 +5,10 @@ import uuid
 
 import cloudinary
 import cloudinary.uploader
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from auth import get_current_user
 from database import get_db
@@ -15,8 +16,8 @@ from models.interaction import Interaction, WatchHistory
 from models.post import Creator, Post
 from models.user import User, UserEmbedding, UserInterest
 from schemas.interaction import InteractionCreate, InteractionOut
-from schemas.post import ExplainResponse, PostOut, PostUploadRequest
-from services.embedding_service import get_content_embedding_text, get_embedding
+from schemas.post import ExplainResponse, PostOut
+from services.embedding_service import get_content_embedding_text, get_embedding, get_user_embedding_text
 from services.recommendation_engine import explain_recommendation
 from services.wellbeing_scorer import score_post
 from services.youtube_ingestion import CATEGORIES, ingest_pexels_videos, ingest_youtube_shorts
@@ -35,6 +36,7 @@ cloudinary.config(
 async def log_interaction(
     post_id: uuid.UUID,
     body: InteractionCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -71,11 +73,24 @@ async def log_interaction(
     # Update user interest scores based on interaction
     if body.action in ("like", "save"):
         await _boost_interest(db, user.id, post.category, 0.1)
+        await _update_user_embedding(db, user)
     elif body.action == "dislike":
         await _boost_interest(db, user.id, post.category, -0.2)
+        await _update_user_embedding(db, user)
 
     await db.commit()
     await db.refresh(interaction)
+
+    # Invalidate feed cache so interactions take effect on next feed load
+    if body.action in ("like", "save", "dislike"):
+        try:
+            redis = request.app.state.redis
+            keys = await redis.keys(f"feed:{user.id}:*")
+            if keys:
+                await redis.delete(*keys)
+        except Exception:
+            pass
+
     return InteractionOut.model_validate(interaction)
 
 
@@ -177,6 +192,24 @@ async def bias_audit(
     return await generate_bias_report(db)
 
 
+@router.get("/posts/user/{user_id}", response_model=list[PostOut])
+async def get_user_posts(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """Return all posts uploaded by a specific user."""
+    result = await db.execute(
+        select(Post)
+        .options(selectinload(Post.creator))
+        .join(Creator, Post.creator_id == Creator.id)
+        .where(Creator.user_id == user_id)
+        .order_by(Post.created_at.desc())
+    )
+    posts = result.scalars().all()
+    return [PostOut.model_validate(p) for p in posts]
+
+
 # ── Helpers ──
 
 async def _boost_interest(db: AsyncSession, user_id: uuid.UUID, category: str, delta: float):
@@ -192,6 +225,33 @@ async def _boost_interest(db: AsyncSession, user_id: uuid.UUID, category: str, d
         interest.score = max(0.0, min(5.0, interest.score + delta))
     elif delta > 0:
         db.add(UserInterest(user_id=user_id, category=category, score=max(0.0, 1.0 + delta)))
+
+
+async def _update_user_embedding(db: AsyncSession, user: User):
+    """Regenerate user embedding from current interest scores."""
+    from datetime import datetime, timezone
+
+    interests_result = await db.execute(
+        select(UserInterest.category)
+        .where(UserInterest.user_id == user.id)
+        .order_by(UserInterest.score.desc())
+    )
+    cats = [r[0] for r in interests_result.all()]
+    if not cats:
+        return
+
+    emb_text = await get_user_embedding_text(cats, user.bio)
+    emb_vector = await get_embedding(emb_text)
+
+    existing_emb = await db.execute(
+        select(UserEmbedding).where(UserEmbedding.user_id == user.id)
+    )
+    emb_record = existing_emb.scalar_one_or_none()
+    if emb_record:
+        emb_record.embedding = emb_vector
+        emb_record.updated_at = datetime.now(timezone.utc)
+    else:
+        db.add(UserEmbedding(user_id=user.id, embedding=emb_vector))
 
 
 async def _get_or_create_user_creator(db: AsyncSession, user: User) -> Creator:
@@ -217,8 +277,13 @@ async def _get_or_create_user_creator(db: AsyncSession, user: User) -> Creator:
 
 async def _run_ingestion(category: str, max_results: int):
     """Background task: ingest YouTube + Pexels content."""
+    import logging
     from database import async_session
 
-    async with async_session() as db:
-        await ingest_youtube_shorts(db, category, max_results)
-        await ingest_pexels_videos(db, category, max_results)
+    logger = logging.getLogger("nouri.ingestion")
+    try:
+        async with async_session() as db:
+            await ingest_youtube_shorts(db, category, max_results)
+            await ingest_pexels_videos(db, category, max_results)
+    except Exception as e:
+        logger.error(f"Ingestion failed for {category}: {e}")

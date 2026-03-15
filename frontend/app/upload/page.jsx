@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  Upload as UploadIcon, Video, FileVideo, X, Loader2, Check,
+  Upload as UploadIcon, FileVideo, X, Loader2, Check,
   Home, Search, PlusSquare, User, BarChart3,
 } from "lucide-react";
 import Link from "next/link";
@@ -19,15 +19,24 @@ const TAG_OPTIONS = [
   "sports", "science", "gaming", "books", "mindfulness",
 ];
 
+const CATEGORY_OPTIONS = [
+  "comedy", "education", "fitness", "cooking", "travel",
+  "music", "art", "technology", "nature", "fashion",
+  "sports", "science", "gaming", "books", "mindfulness",
+  "motivation", "pets", "general",
+];
+
 export default function UploadPage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const fileInputRef = useRef(null);
+  const queryClient = useQueryClient();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState([]);
+  const [category, setCategory] = useState("general");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
 
@@ -38,7 +47,9 @@ export default function UploadPage() {
   const uploadMutation = useMutation({
     mutationFn: (formData) => uploadPost(formData),
     onSuccess: () => {
-      router.push("/feed");
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      queryClient.invalidateQueries({ queryKey: ["myPosts"] });
+      router.push(`/profile/${user?.username || ""}`);
     },
   });
 
@@ -64,6 +75,7 @@ export default function UploadPage() {
     formData.append("title", title.trim());
     formData.append("description", description.trim());
     formData.append("tags", tags.join(","));
+    formData.append("category", category);
 
     uploadMutation.mutate(formData);
   };
@@ -106,7 +118,7 @@ export default function UploadPage() {
             <div className="flex flex-col items-center justify-center py-12">
               <FileVideo className="h-10 w-10 text-gray-600 mb-3" />
               <p className="text-sm text-gray-400">Tap to select a video</p>
-              <p className="text-[10px] text-gray-600 mt-1">MP4, WebM, MOV supported</p>
+              <p className="text-[10px] text-gray-600 mt-1">MP4, WebM, MOV &middot; Max 100MB</p>
             </div>
           )}
           <input
@@ -144,6 +156,22 @@ export default function UploadPage() {
           />
         </div>
 
+        {/* Category */}
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Category *</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="w-full bg-surface border border-gray-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-accent"
+          >
+            {CATEGORY_OPTIONS.map((cat) => (
+              <option key={cat} value={cat} className="bg-surface">
+                {cat.charAt(0).toUpperCase() + cat.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Tags */}
         <div>
           <label className="text-xs text-gray-400 mb-2 block">Tags</label>
@@ -164,6 +192,24 @@ export default function UploadPage() {
             ))}
           </div>
         </div>
+
+        {/* Upload progress message */}
+        {uploadMutation.isPending && (
+          <div className="glass p-3 rounded-xl">
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+              <span>Uploading video... This may take a moment for larger files.</span>
+            </div>
+            <div className="mt-2 h-1.5 bg-surface-light rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-accent rounded-full"
+                initial={{ width: "5%" }}
+                animate={{ width: "90%" }}
+                transition={{ duration: 30, ease: "linear" }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Error */}
         {uploadMutation.isError && (

@@ -9,22 +9,12 @@ from auth import get_current_user
 from database import get_db
 from models.user import User
 from schemas.feed import FeedResponse
-from schemas.post import PostOut, CreatorOut
+from schemas.post import PostOut
 from services.recommendation_engine import get_chronological_feed, get_personalized_feed
 
 router = APIRouter(tags=["feed"])
 
 FEED_CACHE_TTL = 300  # 5 minutes
-
-
-def _serialize_post(post) -> dict:
-    """Convert a Post ORM object into a PostOut-compatible dict."""
-    creator_dict = None
-    if post.creator:
-        creator_dict = CreatorOut.model_validate(post.creator).model_dump(mode="json")
-    out = PostOut.model_validate(post).model_dump(mode="json")
-    out["creator"] = creator_dict
-    return out
 
 
 @router.get("/feed", response_model=FeedResponse)

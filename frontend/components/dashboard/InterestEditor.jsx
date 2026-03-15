@@ -19,12 +19,21 @@ export default function InterestEditor({ interests = [] }) {
 
   const updateMutation = useMutation({
     mutationFn: (categories) => updateInterests(categories),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["interests"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["interests"] });
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      queryClient.invalidateQueries({ queryKey: ["wellbeingStats"] });
+    },
   });
 
   const resetMutation = useMutation({
     mutationFn: resetAlgorithm,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["interests", "feed"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["interests"] });
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      queryClient.invalidateQueries({ queryKey: ["watchHistory"] });
+      queryClient.invalidateQueries({ queryKey: ["wellbeingStats"] });
+    },
   });
 
   const removeInterest = (cat) => {

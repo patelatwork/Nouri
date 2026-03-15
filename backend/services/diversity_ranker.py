@@ -42,10 +42,10 @@ def compute_diversity_score(categories: list[str], creators: list[str]) -> float
     cat_unique = len(set(categories))
     creator_unique = len(set(creators))
     total = len(categories)
-    # Ratio of unique to total, weighted
+    # Ratio of unique to total, weighted equally between categories and creators
     cat_ratio = cat_unique / max(total, 1)
     creator_ratio = creator_unique / max(total, 1)
-    return round(min(100.0, (cat_ratio * 50 + creator_ratio * 50) * 1.5), 1)
+    return round(min(100.0, (cat_ratio * 50 + creator_ratio * 50)), 1)
 
 
 def enforce_diversity_constraints(
@@ -89,13 +89,28 @@ def enforce_diversity_constraints(
             needed_cats = 3 - len(set(cats_in_window))
             for i, p in enumerate(rest):
                 if p["category"] not in set(c["category"] for c in window):
-                    # Insert and remove last
                     window.insert(len(window) - 1, rest.pop(i))
                     if len(window) > window_size:
                         overflow = window.pop()
                         rest.insert(0, overflow)
                     needed_cats -= 1
                     if needed_cats <= 0:
+                        break
+
+        # If too few unique creators, swap from rest
+        unique_creators_in_window = set(p["creator_id"] for p in window)
+        min_creators = min(5, window_size)
+        if len(unique_creators_in_window) < min_creators and rest:
+            needed = min_creators - len(unique_creators_in_window)
+            for i, p in enumerate(rest):
+                if p["creator_id"] not in unique_creators_in_window:
+                    window.insert(len(window) - 1, rest.pop(i))
+                    if len(window) > window_size:
+                        overflow = window.pop()
+                        rest.insert(0, overflow)
+                    unique_creators_in_window.add(p["creator_id"])
+                    needed -= 1
+                    if needed <= 0:
                         break
 
         result.extend(window)

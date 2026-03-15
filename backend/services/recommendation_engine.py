@@ -10,16 +10,15 @@ Pipeline:
 
 from __future__ import annotations
 
-import uuid
 from datetime import date
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models.interaction import Interaction
 from models.post import Post
-from models.user import ScreenTime, User, UserEmbedding, UserInterest
+from models.user import ScreenTime, User, UserEmbedding, UserInterest, UserPreference
 from services.diversity_ranker import (
     compute_diversity_score,
     diversity_bonus,
@@ -53,7 +52,6 @@ async def get_personalized_feed(
     user_embedding = list(user_emb_record.embedding)
 
     # 2 — pgvector retrieval: top-200 by cosine similarity
-    embedding_literal = "[" + ",".join(str(v) for v in user_embedding) + "]"
     stmt = (
         select(Post)
         .options(selectinload(Post.creator))
@@ -66,6 +64,24 @@ async def get_personalized_feed(
 
     if not candidates:
         return await _fallback_feed(db, user, page)
+
+    # 2b — Filter out blocked tags and creators (RES-AI: user control)
+    pref_result = await db.execute(
+        select(UserPreference).where(UserPreference.user_id == user.id)
+    )
+    user_pref = pref_result.scalar_one_or_none()
+    blocked_tags = set(user_pref.blocked_tags or []) if user_pref else set()
+    blocked_creator_ids = set(str(c) for c in (user_pref.blocked_creators or [])) if user_pref else set()
+
+    if blocked_tags or blocked_creator_ids:
+        filtered = []
+        for post in candidates:
+            if blocked_creator_ids and str(post.creator_id) in blocked_creator_ids:
+                continue
+            if blocked_tags and post.tags and blocked_tags.intersection(post.tags):
+                continue
+            filtered.append(post)
+        candidates = filtered
 
     # 3 — Get recently seen categories/creators for diversity
     recent_interactions = await db.execute(

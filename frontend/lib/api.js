@@ -18,6 +18,22 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Auto-logout on 401 — stale/invalid token
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      // Only clear+redirect if we actually had a token (not anonymous access)
+      if (localStorage.getItem("nouri_token")) {
+        localStorage.removeItem("nouri_token");
+        localStorage.removeItem("nouri_user");
+        window.location.href = "/login";
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Auth
 export const signup = (data) => api.post("/auth/signup", data).then((r) => r.data);
 export const login = (data) => api.post("/auth/login", data).then((r) => r.data);
@@ -48,7 +64,12 @@ export const submitWellbeingFeedback = (data) => api.post("/wellbeing/feedback",
 
 // Posts
 export const uploadPost = (formData) =>
-  api.post("/posts/upload", formData, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
+  api.post("/posts/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 300000, // 5 min timeout for video uploads
+  }).then((r) => r.data);
+export const getUserPosts = (userId) =>
+  api.get(`/posts/user/${userId}`).then((r) => r.data);
 export const ingestYouTube = (category, maxResults = 10) =>
   api.get(`/posts/ingest-youtube?category=${category}&max_results=${maxResults}`).then((r) => r.data);
 

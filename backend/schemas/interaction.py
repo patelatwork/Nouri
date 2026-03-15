@@ -32,5 +32,7 @@ class WatchHistoryOut(BaseModel):
     completion_rate: float
     post_title: str | None = None
     thumbnail_url: str | None = None
+    creator_name: str | None = None
+    category: str | None = None
 
     model_config = {"from_attributes": True}

@@ -30,12 +30,12 @@ export default function FeedPage() {
     if (!isAuthenticated) router.replace("/login");
   }, [isAuthenticated, router]);
 
-  // Start screen time tracking
+  // Start screen time tracking — keyed to the logged-in user so accounts don't share data
   useEffect(() => {
-    startSession();
+    startSession(user?.id);
     const interval = setInterval(tick, 60000); // tick every minute
     return () => clearInterval(interval);
-  }, [startSession, tick]);
+  }, [startSession, tick, user?.id]);
 
   // Screen time break prompts
   useEffect(() => {
@@ -118,10 +118,13 @@ export default function FeedPage() {
           <div className="max-w-md mx-auto mt-1">
             <div className="flex items-center gap-2 text-[10px] text-gray-500">
               <span>Feed diversity: {data.diversity_score}%</span>
-              <div className="flex-1 h-1 bg-surface-light rounded-full">
+              <div className="flex-1 h-1.5 bg-surface-light rounded-full">
                 <div
-                  className="h-full bg-secondary rounded-full transition-all"
-                  style={{ width: `${data.diversity_score}%` }}
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${data.diversity_score}%`,
+                    backgroundColor: data.diversity_score >= 70 ? "#10b981" : data.diversity_score >= 40 ? "#f59e0b" : "#ef4444",
+                  }}
                 />
               </div>
             </div>

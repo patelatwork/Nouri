@@ -3,14 +3,13 @@
 import { useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import {
-  User as UserIcon, Shield, Clock, Eye,
+  User as UserIcon, Shield, Clock, Eye, LogOut, Play, Film,
   Home, Search, PlusSquare, BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 
-import { getMe, getWellbeingStats } from "@/lib/api";
+import { getMe, getWellbeingStats, getUserPosts } from "@/lib/api";
 import { useAuthStore, useScreenTimeStore } from "@/lib/store";
 import DiversityGauge from "@/components/dashboard/DiversityGauge";
 import { cn } from "@/lib/utils";
@@ -20,7 +19,13 @@ export default function ProfilePage() {
   const params = useParams();
   const currentUser = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const logout = useAuthStore((s) => s.logout);
   const minutesToday = useScreenTimeStore((s) => s.minutesToday);
+
+  const handleLogout = () => {
+    logout();
+    router.push("/");
+  };
 
   useEffect(() => {
     if (!isAuthenticated) router.replace("/login");
@@ -40,9 +45,15 @@ export default function ProfilePage() {
 
   const user = me || currentUser;
 
+  const { data: myPosts = [], isLoading: postsLoading } = useQuery({
+    queryKey: ["myPosts", user?.id],
+    queryFn: () => getUserPosts(user.id),
+    enabled: isAuthenticated && !!user?.id,
+  });
+
   if (!isAuthenticated || !user) return null;
 
-  const privacyTier = user.privacy_level || "standard";
+  const privacyTier = user.privacy_level || user.privacy_tier || "standard";
   const privacyLabel = {
     standard: "Standard",
     privacy_plus: "Privacy Plus",
@@ -55,6 +66,16 @@ export default function ProfilePage() {
       <div className="relative">
         <div className="h-32 bg-gradient-to-br from-accent/30 to-secondary/20" />
         <div className="max-w-md mx-auto px-4 -mt-12">
+          {/* Logout button — top right */}
+          <div className="absolute top-4 right-4">
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-400 transition-colors bg-surface-light/80 backdrop-blur-sm px-3 py-1.5 rounded-full"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Logout
+            </button>
+          </div>
           {/* Avatar */}
           <div className="w-24 h-24 rounded-full bg-surface border-4 border-background flex items-center justify-center">
             <UserIcon className="h-10 w-10 text-gray-500" />
@@ -99,7 +120,7 @@ export default function ProfilePage() {
                 ? "text-red-400"
                 : "text-accent"
             )}>
-              {minutesToday}m
+              {Math.round(minutesToday)}m
             </span>
           </div>
           <div className="mt-2 h-2 bg-surface-light rounded-full overflow-hidden">
@@ -116,6 +137,58 @@ export default function ProfilePage() {
           <p className="text-[10px] text-gray-500 mt-1">
             Limit: {user.daily_limit_minutes || 60} min/day
           </p>
+        </div>
+
+        {/* My Reels */}
+        <div className="glass p-4 rounded-2xl">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Film className="h-4 w-4 text-accent" /> My Reels
+            </h3>
+            <Link href="/upload" className="text-[10px] text-accent hover:underline">
+              + Upload
+            </Link>
+          </div>
+
+          {postsLoading ? (
+            <div className="grid grid-cols-3 gap-2">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-28 bg-surface rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : myPosts.length === 0 ? (
+            <div className="text-center py-6">
+              <Film className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+              <p className="text-xs text-gray-500">No uploads yet</p>
+              <Link href="/upload" className="text-xs text-accent hover:underline mt-1 inline-block">
+                Upload your first video
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {myPosts.map((post) => (
+                <div key={post.id} className="relative group rounded-lg overflow-hidden bg-surface">
+                  {post.thumbnail_url ? (
+                    <img
+                      src={post.thumbnail_url}
+                      alt={post.title}
+                      className="w-full h-28 object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-28 flex items-center justify-center bg-surface-light">
+                      <Play className="h-5 w-5 text-gray-600" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <p className="text-[9px] text-white text-center px-1 line-clamp-2">{post.title}</p>
+                  </div>
+                  <div className="absolute bottom-1 left-1 bg-black/60 px-1 py-0.5 rounded text-[8px] text-gray-300">
+                    {post.views_count || 0} views
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Content visibility */}

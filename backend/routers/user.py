@@ -3,14 +3,14 @@
 from datetime import date, datetime, timezone
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import get_current_user
 from database import get_db
 from models.interaction import WatchHistory
-from models.post import Post
+from models.post import Creator, Post
 from models.user import ScreenTime, User, UserEmbedding, UserInterest, UserPreference
 from schemas.user import (
     InterestUpdateRequest,
@@ -47,6 +47,7 @@ async def get_interests(
 @router.post("/interests/update", response_model=list[UserInterestOut])
 async def update_interests(
     body: InterestUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -76,6 +77,16 @@ async def update_interests(
         db.add(UserEmbedding(user_id=user.id, embedding=emb_vector))
 
     await db.commit()
+
+    # Invalidate feed cache so new interests take effect immediately
+    try:
+        redis = request.app.state.redis
+        keys = await redis.keys(f"feed:{user.id}:*")
+        if keys:
+            await redis.delete(*keys)
+    except Exception:
+        pass  # Redis unavailable is non-fatal
+
     return [UserInterestOut.model_validate(i) for i in new_interests]
 
 
@@ -132,8 +143,9 @@ async def get_watch_history(
 ):
     offset = (page - 1) * 20
     result = await db.execute(
-        select(WatchHistory, Post.title, Post.thumbnail_url)
+        select(WatchHistory, Post.title, Post.thumbnail_url, Post.category, Creator.name)
         .join(Post, WatchHistory.post_id == Post.id)
+        .outerjoin(Creator, Post.creator_id == Creator.id)
         .where(WatchHistory.user_id == user.id)
         .order_by(WatchHistory.watched_at.desc())
         .offset(offset)
@@ -148,8 +160,10 @@ async def get_watch_history(
             completion_rate=wh.completion_rate,
             post_title=title,
             thumbnail_url=thumb,
+            category=category,
+            creator_name=creator_name,
         )
-        for wh, title, thumb in rows
+        for wh, title, thumb, category, creator_name in rows
     ]
 
 
