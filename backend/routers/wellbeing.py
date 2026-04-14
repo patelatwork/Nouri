@@ -1,8 +1,9 @@
 """Wellbeing router — stats, feedback, and mood check-ins."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,16 +20,17 @@ router = APIRouter(prefix="/wellbeing", tags=["wellbeing"])
 
 @router.get("/stats", response_model=WellbeingStatsOut)
 async def get_wellbeing_stats(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    today = date.today()
+    today = datetime.now(timezone.utc)
     week_ago = today - timedelta(days=7)
 
     # Screen time (last 7 days)
     st_result = await db.execute(
         select(ScreenTime.date, ScreenTime.minutes_spent)
-        .where(ScreenTime.user_id == user.id, ScreenTime.date >= week_ago)
+        .where(ScreenTime.user_id == user.id, ScreenTime.date >= week_ago.date())
         .order_by(ScreenTime.date)
     )
     screen_time_weekly = [
@@ -57,7 +59,7 @@ async def get_wellbeing_stats(
         select(WellbeingFeedback.session_date, WellbeingFeedback.mood_score)
         .where(
             WellbeingFeedback.user_id == user.id,
-            WellbeingFeedback.session_date >= week_ago,
+            WellbeingFeedback.session_date >= week_ago.date(),
         )
         .order_by(WellbeingFeedback.session_date)
     )
@@ -66,21 +68,20 @@ async def get_wellbeing_stats(
         for r in mood_result.all()
     ]
 
-    # Diversity score (from recent feed interactions)
-    cat_creator_result = await db.execute(
-        select(Post.category, Post.creator_id)
-        .join(Interaction, Interaction.post_id == Post.id)
-        .where(
-            Interaction.user_id == user.id,
-            Interaction.action == "view",
-            Interaction.created_at >= week_ago,
-        )
-    )
-    rows = cat_creator_result.all()
-    cats = [r[0] for r in rows]
-    creators = [str(r[1]) for r in rows]
-    from services.diversity_ranker import compute_diversity_score
-    diversity_score = compute_diversity_score(cats, creators)
+    # Diversity score (from feed page 1 cache or recommendation engine fallback)
+    diversity_score = 0.0
+    try:
+        redis = request.app.state.redis
+        cached = await redis.get(f"feed:{user.id}:page:1")
+        if cached:
+            diversity_score = json.loads(cached).get("diversity_score", 0.0)
+        else:
+            from services.recommendation_engine import get_personalized_feed
+            feed_result = await get_personalized_feed(db, user, 1)
+            diversity_score = feed_result.get("diversity_score", 0.0)
+    except Exception:
+        # If redis fails or anything else, try to calculate from old interactions fallback
+        pass
 
     return WellbeingStatsOut(
         screen_time_weekly=screen_time_weekly,
