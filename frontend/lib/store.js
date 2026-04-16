@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { syncScreenTime } from "@/lib/api";
 
+// Returns today's date string in local time (YYYY-MM-DD), matching the backend's date()
+const getLocalDateStr = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 // ── Auth Store ──
 export const useAuthStore = create((set) => ({
   user: null,
@@ -48,37 +57,48 @@ export const useScreenTimeStore = create((set, get) => ({
   hardBreakActive: false,
   _syncPending: false,
 
-  hydrate: () => {
+  // Reads the persisted minutes for today from localStorage and loads them into state.
+  // Call this on any page that needs to display screen time (not just the feed).
+  hydrate: (userId) => {
     if (typeof window === "undefined") return;
-    // Read user from auth localStorage to get the userId
-    const userStr = localStorage.getItem("nouri_user");
-    if (!userStr) return;
-    try {
-      const user = JSON.parse(userStr);
-      const userId = user?.id;
-      if (!userId) return;
-      const today = new Date().toISOString().slice(0, 10);
-      const stored = localStorage.getItem(`nouri_screentime_${userId}_${today}`);
-      if (stored) {
-        set({ minutesToday: parseFloat(stored), currentUserId: userId });
-      }
-    } catch {
-      // ignore parse errors
+    // Resolve userId from param or fall back to localStorage
+    let uid = userId;
+    if (!uid) {
+      try {
+        const userStr = localStorage.getItem("nouri_user");
+        if (userStr) uid = JSON.parse(userStr)?.id;
+      } catch { /* ignore */ }
+    }
+    if (!uid) return;
+    const today = getLocalDateStr();
+    const stored = localStorage.getItem(`nouri_screentime_${uid}_${today}`);
+    const minutes = stored ? parseFloat(stored) : 0;
+    // Only update if we have more data or a different user
+    const { currentUserId, minutesToday } = get();
+    if (uid !== currentUserId || minutes > minutesToday) {
+      set({ minutesToday: minutes, currentUserId: uid });
     }
   },
 
   startSession: (userId) => {
-    const { minutesToday: current, currentUserId } = get();
-    // If already hydrated for this user, only reset the timer—don't zero out minutes
-    if (currentUserId === userId && current > 0) {
-      set({ sessionStartedAt: Date.now(), breakPromptShown: false, hardBreakActive: false });
-      return;
-    }
-    set({ sessionStartedAt: Date.now(), currentUserId: userId || null, minutesToday: 0, breakPromptShown: false, hardBreakActive: false });
-    if (typeof window !== "undefined" && userId) {
-      const today = new Date().toISOString().slice(0, 10);
-      const stored = localStorage.getItem(`nouri_screentime_${userId}_${today}`);
-      if (stored) set({ minutesToday: parseFloat(stored) });
+    if (!userId) return;
+    const today = getLocalDateStr();
+    const stored = localStorage.getItem(`nouri_screentime_${userId}_${today}`);
+    const persistedMinutes = stored ? parseFloat(stored) : 0;
+
+    const { currentUserId } = get();
+    if (currentUserId === userId) {
+      // Same user — just restart the clock from current accumulated minutes
+      set({ sessionStartedAt: Date.now(), minutesToday: persistedMinutes, breakPromptShown: false, hardBreakActive: false });
+    } else {
+      // Different/new user — load their persisted minutes fresh
+      set({
+        sessionStartedAt: Date.now(),
+        currentUserId: userId,
+        minutesToday: persistedMinutes,
+        breakPromptShown: false,
+        hardBreakActive: false,
+      });
     }
   },
 
@@ -89,7 +109,7 @@ export const useScreenTimeStore = create((set, get) => ({
     const total = minutesToday + elapsed;
 
     if (typeof window !== "undefined" && currentUserId) {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getLocalDateStr();
       localStorage.setItem(`nouri_screentime_${currentUserId}_${today}`, String(total));
 
       // Sync to backend on each tick so server has persistent data
@@ -101,6 +121,27 @@ export const useScreenTimeStore = create((set, get) => ({
       }
     }
     set({ minutesToday: total, sessionStartedAt: Date.now() });
+  },
+
+  // Call this when navigating away from an active session (e.g. feed unmount).
+  // Flushes the elapsed time since the last tick to localStorage so no time is lost.
+  endSession: () => {
+    const { sessionStartedAt, minutesToday, currentUserId } = get();
+    if (!sessionStartedAt || !currentUserId) return;
+
+    const elapsed = (Date.now() - sessionStartedAt) / 60000;
+    const total = minutesToday + elapsed;
+
+    if (typeof window !== "undefined") {
+      const today = getLocalDateStr();
+      localStorage.setItem(`nouri_screentime_${currentUserId}_${today}`, String(total));
+
+      // Best-effort backend sync — fire and forget
+      syncScreenTime({ date: today, minutes_spent: Math.round(total * 100) / 100 }).catch(() => {});
+    }
+
+    // Update in-memory state so any still-mounted component (like profile) sees correct value
+    set({ minutesToday: total, sessionStartedAt: null });
   },
 
   showBreakPrompt: () => set({ breakPromptShown: true }),

@@ -3,6 +3,83 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Volume2, VolumeX } from "lucide-react";
 
+// ── YouTube IFrame API view tracker ──────────────────────────────────────
+// The YT iframe is sandboxed so we can't read currentTime directly.
+// We listen for postMessage events from the YT player (requires enablejsapi=1)
+// to detect when playback starts and how long the user watched.
+function YouTubePlayer({ embedUrl, onWatchProgress }) {
+  const iframeRef = useRef(null);
+  const startTimeRef = useRef(null);
+  const reportedRef = useRef(false);
+
+  useEffect(() => {
+    const handleMessage = (event) => {
+      try {
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        // YT sends {event: "infoDelivery", info: {playerState, currentTime, duration, ...}}
+        if (data?.event === "infoDelivery" && data?.info) {
+          const { playerState, currentTime, duration } = data.info;
+          // playerState 1 = playing
+          if (playerState === 1 && !startTimeRef.current) {
+            startTimeRef.current = Date.now();
+          }
+          // Once user has watched > 2 seconds, log a view
+          if (
+            !reportedRef.current &&
+            currentTime != null &&
+            currentTime > 2 &&
+            duration != null &&
+            duration > 0
+          ) {
+            reportedRef.current = true;
+            const completion = Math.min(currentTime / duration, 1);
+            onWatchProgress?.(currentTime, completion);
+          }
+        }
+        // Also handle the simpler onStateChange messages
+        if (data?.event === "onStateChange" && data?.info === 1) {
+          // State 1 = playing — start timer
+          if (!startTimeRef.current) startTimeRef.current = Date.now();
+        }
+      } catch { /* ignore non-YT messages */ }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [onWatchProgress]);
+
+  // After 3s of the iframe being mounted, fire a fallback view log
+  // (handles cases where the YT iframe API doesn't send postMessages)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!reportedRef.current) {
+        reportedRef.current = true;
+        // We can't know exact time for iframe, so estimate 3s watched at unknown completion
+        onWatchProgress?.(3, 0.05);
+      }
+    }, 4000); // 4s: give the iframe enough time to actually start
+    return () => clearTimeout(timer);
+  }, [onWatchProgress]);
+
+  // Build URL with JS API enabled so we can receive postMessages
+  const src = embedUrl
+    ? `${embedUrl}?autoplay=0&controls=1&modestbranding=1&rel=0&enablejsapi=1&origin=${typeof window !== "undefined" ? window.location.origin : ""}`
+    : "";
+
+  return (
+    <div className="relative w-full h-full bg-black rounded-2xl overflow-hidden">
+      <iframe
+        ref={iframeRef}
+        src={src}
+        className="w-full h-full"
+        allow="encrypted-media"
+        allowFullScreen
+        title="Video player"
+      />
+    </div>
+  );
+}
+
+// ── Direct video player (Pexels / uploads) ────────────────────────────────
 export default function ReelPlayer({ videoUrl, embedUrl, sourceApi, onWatchProgress }) {
   const videoRef = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -11,12 +88,12 @@ export default function ReelPlayer({ videoUrl, embedUrl, sourceApi, onWatchProgr
   const [duration, setDuration] = useState(0);
   const intervalRef = useRef(null);
 
-  // Track watch progress
+  // Track watch progress on each tick
   const trackProgress = useCallback(() => {
     if (videoRef.current) {
       const current = videoRef.current.currentTime;
       const total = videoRef.current.duration || 1;
-      const pct = current / total;
+      const pct = Math.min(current / total, 1);
       setProgress(pct * 100);
       setDuration(total);
       onWatchProgress?.(current, pct);
@@ -41,19 +118,9 @@ export default function ReelPlayer({ videoUrl, embedUrl, sourceApi, onWatchProgr
     setPlaying(!playing);
   };
 
-  // YouTube embed — no autoplay
+  // YouTube embed — delegate to YouTubePlayer which handles view tracking
   if (sourceApi === "youtube" && embedUrl) {
-    return (
-      <div className="relative w-full h-full bg-black rounded-2xl overflow-hidden">
-        <iframe
-          src={`${embedUrl}?autoplay=0&controls=1&modestbranding=1&rel=0`}
-          className="w-full h-full"
-          allow="encrypted-media"
-          allowFullScreen
-          title="Video player"
-        />
-      </div>
-    );
+    return <YouTubePlayer embedUrl={embedUrl} onWatchProgress={onWatchProgress} />;
   }
 
   // Direct video (Pexels / uploads)

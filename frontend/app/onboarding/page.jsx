@@ -44,7 +44,11 @@ export default function OnboardingPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await signup(data);
+      const res = await signup({
+        ...data,
+        username: data.username.trim(),
+        email: data.email.trim(),
+      });
       setAuth(res.user, res.access_token);
       router.push("/feed");
     } catch (err) {

@@ -17,7 +17,7 @@ export default function StepBasicInfo({ data, onChange }) {
           <input
             type="text"
             value={data.username}
-            onChange={(e) => onChange({ username: e.target.value })}
+            onChange={(e) => onChange({ username: e.target.value.trim() })}
             placeholder="your_username"
             className="w-full rounded-xl bg-surface-light border border-gray-700 px-4 py-3 text-white placeholder-gray-500 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
@@ -30,7 +30,7 @@ export default function StepBasicInfo({ data, onChange }) {
           <input
             type="email"
             value={data.email}
-            onChange={(e) => onChange({ email: e.target.value })}
+            onChange={(e) => onChange({ email: e.target.value.trim() })}
             placeholder="you@example.com"
             className="w-full rounded-xl bg-surface-light border border-gray-700 px-4 py-3 text-white placeholder-gray-500 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />

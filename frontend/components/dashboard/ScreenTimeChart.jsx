@@ -8,10 +8,18 @@ export default function ScreenTimeChart({ screenTimeData = [], dailyLimit = 60 }
   const today = new Date();
   const chartData = [];
 
+  // Helper to get local date string (YYYY-MM-DD) matching the backend's date()
+  const toLocalDateStr = (d) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   for (let i = 6; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
+    const dateStr = toLocalDateStr(d);
     const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
     const found = screenTimeData.find((entry) => entry.date === dateStr);
     const minutes = found ? Math.round(found.minutes) : 0;

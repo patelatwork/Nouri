@@ -21,7 +21,7 @@ export default function FeedPage() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const { feedMode, setFeedMode } = useFeedStore();
-  const { minutesToday, startSession, tick, breakPromptShown, hardBreakActive, showBreakPrompt, activateHardBreak, dismissBreak } = useScreenTimeStore();
+  const { minutesToday, startSession, tick, endSession, breakPromptShown, hardBreakActive, showBreakPrompt, activateHardBreak, dismissBreak } = useScreenTimeStore();
 
   const [page, setPage] = useState(1);
   const [allPosts, setAllPosts] = useState([]);
@@ -32,10 +32,19 @@ export default function FeedPage() {
 
   // Start screen time tracking — keyed to the logged-in user so accounts don't share data
   useEffect(() => {
-    startSession(user?.id);
-    const interval = setInterval(tick, 60000); // tick every minute
-    return () => clearInterval(interval);
-  }, [startSession, tick, user?.id]);
+    if (!user?.id) return;
+    startSession(user.id);
+    // First tick after 1s (picks up initial elapsed), then every 30s for responsive updates
+    const initialTick = setTimeout(tick, 1000);
+    const interval = setInterval(tick, 30000);
+    return () => {
+      // ⚡ Flush all un-ticked elapsed time to localStorage when navigating away
+      // This is the key to persistence: without this, any time since the last 30s tick is lost
+      endSession();
+      clearTimeout(initialTick);
+      clearInterval(interval);
+    };
+  }, [startSession, tick, endSession, user?.id]);
 
   // Screen time break prompts
   useEffect(() => {

@@ -141,30 +141,46 @@ async def get_watch_history(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    offset = (page - 1) * 20
+    from models.interaction import WatchHistory as WH
+    from sqlalchemy import desc
+
+    offset = (page - 1) * 50
+    # Use WatchHistory table (written on every 'view' interaction)
+    # Use a subquery to get the most recent watch per post (deduplicated)
     result = await db.execute(
-        select(WatchHistory, Post.title, Post.thumbnail_url, Post.category, Creator.name)
-        .join(Post, WatchHistory.post_id == Post.id)
+        select(WH, Post.title, Post.thumbnail_url, Post.category, Creator.name)
+        .join(Post, WH.post_id == Post.id)
         .outerjoin(Creator, Post.creator_id == Creator.id)
-        .where(WatchHistory.user_id == user.id)
-        .order_by(WatchHistory.watched_at.desc())
+        .where(WH.user_id == user.id)
+        .order_by(WH.watched_at.desc())
         .offset(offset)
-        .limit(20)
+        .limit(50)
     )
     rows = result.all()
+
+    # Deduplicate: keep only most recent watch per post (already ordered by newest first)
+    seen_posts: set = set()
+    unique_rows = []
+    for row in rows:
+        wh = row[0]
+        if wh.post_id not in seen_posts:
+            seen_posts.add(wh.post_id)
+            unique_rows.append(row)
+
     return [
         WatchHistoryOut(
             id=wh.id,
             post_id=wh.post_id,
             watched_at=wh.watched_at,
-            completion_rate=wh.completion_rate,
+            completion_rate=wh.completion_rate or 0.0,
             post_title=title,
             thumbnail_url=thumb,
             category=category,
             creator_name=creator_name,
         )
-        for wh, title, thumb, category, creator_name in rows
+        for wh, title, thumb, category, creator_name in unique_rows
     ]
+
 
 
 @router.post("/screen-time/sync")

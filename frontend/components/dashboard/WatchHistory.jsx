@@ -1,19 +1,32 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, Play, User, Tag } from "lucide-react";
+import { Clock, Play, User, Tag, ChevronDown } from "lucide-react";
 import { getWatchHistory } from "@/lib/api";
 
 export default function WatchHistory() {
-  const { data: history = [], isLoading } = useQuery({
-    queryKey: ["watchHistory"],
-    queryFn: () => getWatchHistory(1),
+  const [page, setPage] = useState(1);
+  const [allItems, setAllItems] = useState([]);
+  const [showAll, setShowAll] = useState(false);
+
+  const { data: history = [], isLoading, isFetching } = useQuery({
+    queryKey: ["watchHistory", page],
+    queryFn: () => getWatchHistory(page),
+    onSuccess: (data) => {
+      setAllItems((prev) => (page === 1 ? data : [...prev, ...data]));
+    },
+    keepPreviousData: true,
   });
+
+  // Merge pages — on first load allItems might be empty, use history directly
+  const items = allItems.length > 0 ? allItems : history;
+  const displayed = showAll ? items : items.slice(0, 9);
 
   // Calculate creator and category stats
   const creatorStats = {};
   const categoryStats = {};
-  history.forEach((item) => {
+  items.forEach((item) => {
     if (item.creator_name) {
       creatorStats[item.creator_name] = (creatorStats[item.creator_name] || 0) + 1;
     }
@@ -22,7 +35,7 @@ export default function WatchHistory() {
     }
   });
 
-  const totalViews = history.length;
+  const totalViews = items.length;
 
   const sortedCreators = Object.entries(creatorStats)
     .sort(([, a], [, b]) => b - a)
@@ -31,7 +44,7 @@ export default function WatchHistory() {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
 
-  if (isLoading) {
+  if (isLoading && page === 1) {
     return (
       <div className="glass p-4 rounded-2xl animate-pulse">
         <h3 className="text-sm font-semibold text-white mb-3">Watch History</h3>
@@ -53,44 +66,68 @@ export default function WatchHistory() {
           {totalViews > 0 && <span className="text-[10px] text-gray-500 ml-2 font-normal">{totalViews} watched</span>}
         </h3>
 
-        {history.length === 0 ? (
-          <p className="text-xs text-gray-500 text-center py-6">No watch history yet</p>
+        {items.length === 0 ? (
+          <p className="text-xs text-gray-500 text-center py-6">No watch history yet — start watching videos on the feed!</p>
         ) : (
-          <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
-            {history.slice(0, 9).map((item) => (
-              <div key={item.id} className="relative group rounded-lg overflow-hidden bg-surface">
-                {item.thumbnail_url ? (
-                  <img
-                    src={item.thumbnail_url}
-                    alt=""
-                    className="w-full h-24 object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-24 flex items-center justify-center bg-surface-light">
-                    <Play className="h-5 w-5 text-gray-600" />
-                  </div>
-                )}
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              {displayed.map((item) => (
+                <div key={item.id} className="relative group rounded-lg overflow-hidden bg-surface">
+                  {item.thumbnail_url ? (
+                    <img
+                      src={item.thumbnail_url}
+                      alt=""
+                      className="w-full h-24 object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-24 flex items-center justify-center bg-surface-light">
+                      <Play className="h-5 w-5 text-gray-600" />
+                    </div>
+                  )}
 
-                {/* Overlay */}
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center">
-                  <p className="text-[9px] text-white text-center px-1 line-clamp-2 mb-1">
-                    {item.post_title || "Video"}
-                  </p>
-                  {item.creator_name && (
-                    <p className="text-[8px] text-gray-300">{item.creator_name}</p>
+                  {/* Overlay */}
+                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center">
+                    <p className="text-[9px] text-white text-center px-1 line-clamp-2 mb-1">
+                      {item.post_title || "Video"}
+                    </p>
+                    {item.creator_name && (
+                      <p className="text-[8px] text-gray-300">{item.creator_name}</p>
+                    )}
+                  </div>
+
+                  {/* Completion badge */}
+                  {item.completion_rate > 0 && (
+                    <div className="absolute bottom-1 right-1 flex items-center gap-0.5 bg-black/70 px-1 py-0.5 rounded text-[8px] text-gray-300">
+                      <Clock className="h-2 w-2" />
+                      {Math.round(item.completion_rate * 100)}%
+                    </div>
                   )}
                 </div>
+              ))}
+            </div>
 
-                {/* Completion badge */}
-                {item.completion_rate > 0 && (
-                  <div className="absolute bottom-1 right-1 flex items-center gap-0.5 bg-black/70 px-1 py-0.5 rounded text-[8px] text-gray-300">
-                    <Clock className="h-2 w-2" />
-                    {Math.round(item.completion_rate * 100)}%
-                  </div>
+            {/* Show more / load more controls */}
+            {items.length > 9 && !showAll && (
+              <button
+                onClick={() => setShowAll(true)}
+                className="mt-3 w-full text-xs text-accent hover:underline flex items-center justify-center gap-1"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+                Show all {items.length} videos
+              </button>
+            )}
+            {showAll && history.length === 50 && (
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={isFetching}
+                className="mt-3 w-full text-xs text-accent hover:underline flex items-center justify-center gap-1 disabled:opacity-50"
+              >
+                {isFetching ? "Loading..." : (
+                  <><ChevronDown className="h-3.5 w-3.5" /> Load more</>
                 )}
-              </div>
-            ))}
-          </div>
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -152,3 +189,5 @@ export default function WatchHistory() {
     </div>
   );
 }
+
+

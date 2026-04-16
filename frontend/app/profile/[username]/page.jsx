@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -20,7 +20,10 @@ export default function ProfilePage() {
   const currentUser = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const logout = useAuthStore((s) => s.logout);
-  const minutesToday = useScreenTimeStore((s) => s.minutesToday);
+  const { minutesToday, sessionStartedAt, hydrate } = useScreenTimeStore();
+
+  // Compute live display minutes (add elapsed since last tick so we don't show stale value)
+  const [displayMinutes, setDisplayMinutes] = useState(minutesToday);
 
   const handleLogout = () => {
     logout();
@@ -30,6 +33,28 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!isAuthenticated) router.replace("/login");
   }, [isAuthenticated, router]);
+
+  // Hydrate screen time from localStorage when landing on profile directly
+  useEffect(() => {
+    if (currentUser?.id) {
+      hydrate(currentUser.id);
+    }
+  }, [currentUser?.id, hydrate]);
+
+  // Keep display minutes live (refreshed every 5s)
+  useEffect(() => {
+    const update = () => {
+      if (sessionStartedAt) {
+        const elapsed = (Date.now() - sessionStartedAt) / 60000;
+        setDisplayMinutes(minutesToday + elapsed);
+      } else {
+        setDisplayMinutes(minutesToday);
+      }
+    };
+    update();
+    const id = setInterval(update, 5000);
+    return () => clearInterval(id);
+  }, [minutesToday, sessionStartedAt]);
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -116,21 +141,24 @@ export default function ProfilePage() {
             </div>
             <span className={cn(
               "text-lg font-bold",
-              minutesToday > (user.daily_limit_minutes || 60)
+              displayMinutes > (user.daily_limit_minutes || 60)
                 ? "text-red-400"
                 : "text-accent"
             )}>
-              {Math.round(minutesToday)}m
+              {displayMinutes < 1
+                ? `${Math.round(displayMinutes * 60)}s`
+                : `${Math.floor(displayMinutes)}m ${Math.round((displayMinutes % 1) * 60)}s`
+              }
             </span>
           </div>
           <div className="mt-2 h-2 bg-surface-light rounded-full overflow-hidden">
             <div
               className={cn(
                 "h-full rounded-full transition-all",
-                minutesToday > (user.daily_limit_minutes || 60) ? "bg-red-500" : "bg-accent"
+                displayMinutes > (user.daily_limit_minutes || 60) ? "bg-red-500" : "bg-accent"
               )}
               style={{
-                width: `${Math.min(100, (minutesToday / (user.daily_limit_minutes || 60)) * 100)}%`,
+                width: `${Math.min(100, (displayMinutes / (user.daily_limit_minutes || 60)) * 100)}%`,
               }}
             />
           </div>
