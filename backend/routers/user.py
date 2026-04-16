@@ -21,7 +21,7 @@ from schemas.user import (
     UserPublic,
 )
 from schemas.interaction import WatchHistoryOut
-from services.embedding_service import get_embedding, get_user_embedding_text
+from services.embedding_service import get_embedding, get_user_embedding_text, privatise_user_embedding
 
 router = APIRouter(prefix="/user", tags=["user"])
 
@@ -62,9 +62,10 @@ async def update_interests(
         db.add(interest)
         new_interests.append(interest)
 
-    # Regenerate user embedding
+    # Regenerate user embedding with DP noise (Gaussian mechanism)
     emb_text = await get_user_embedding_text(body.interests, user.bio)
-    emb_vector = await get_embedding(emb_text)
+    raw_vector = await get_embedding(emb_text)
+    emb_vector = await privatise_user_embedding(raw_vector)  # ← DP applied here
 
     existing_emb = await db.execute(
         select(UserEmbedding).where(UserEmbedding.user_id == user.id)
@@ -223,7 +224,8 @@ async def reset_algorithm(
     cats = [r[0] for r in interests_result.all()]
 
     emb_text = await get_user_embedding_text(cats, user.bio)
-    emb_vector = await get_embedding(emb_text)
+    raw_vector = await get_embedding(emb_text)
+    emb_vector = await privatise_user_embedding(raw_vector)  # ← DP applied here
 
     existing_emb = await db.execute(
         select(UserEmbedding).where(UserEmbedding.user_id == user.id)

@@ -17,7 +17,12 @@ from models.post import Creator, Post
 from models.user import User, UserEmbedding, UserInterest
 from schemas.interaction import InteractionCreate, InteractionOut
 from schemas.post import ExplainResponse, PostOut
-from services.embedding_service import get_content_embedding_text, get_embedding, get_user_embedding_text
+from services.embedding_service import (
+    get_content_embedding_text,
+    get_embedding,
+    get_user_embedding_text,
+    privatise_user_embedding,
+)
 from services.recommendation_engine import explain_recommendation
 from services.wellbeing_scorer import score_post
 from services.youtube_ingestion import CATEGORIES, ingest_pexels_videos, ingest_youtube_shorts
@@ -228,7 +233,13 @@ async def _boost_interest(db: AsyncSession, user_id: uuid.UUID, category: str, d
 
 
 async def _update_user_embedding(db: AsyncSession, user: User):
-    """Regenerate user embedding from current interest scores."""
+    """Regenerate user embedding from current interest scores.
+
+    The raw embedding from HuggingFace is passed through
+    privatise_user_embedding() which adds calibrated Gaussian noise
+    before the vector is written to the database. This prevents
+    membership inference attacks on the stored embedding.
+    """
     from datetime import datetime, timezone
 
     interests_result = await db.execute(
@@ -241,7 +252,12 @@ async def _update_user_embedding(db: AsyncSession, user: User):
         return
 
     emb_text = await get_user_embedding_text(cats, user.bio)
-    emb_vector = await get_embedding(emb_text)
+    raw_vector = await get_embedding(emb_text)
+
+    # ── Differential Privacy: add Gaussian noise before storing ─────────────
+    # Protects against membership inference. Content embeddings (posts)
+    # are NOT noised — only user profile embeddings.
+    emb_vector = await privatise_user_embedding(raw_vector)
 
     existing_emb = await db.execute(
         select(UserEmbedding).where(UserEmbedding.user_id == user.id)

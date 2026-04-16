@@ -39,12 +39,14 @@ export default function DashboardPage() {
     queryKey: ["wellbeingStats"],
     queryFn: getWellbeingStats,
     enabled: isAuthenticated,
+    staleTime: 2 * 60 * 1000,  // treat as fresh for 2 minutes
   });
 
   const { data: interests, isLoading: interestsLoading } = useQuery({
     queryKey: ["interests"],
     queryFn: getInterests,
     enabled: isAuthenticated,
+    staleTime: 2 * 60 * 1000,  // treat as fresh for 2 minutes
   });
 
   if (!isAuthenticated) return null;

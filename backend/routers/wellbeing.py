@@ -14,6 +14,7 @@ from models.post import Post
 from models.user import ScreenTime, User
 from models.wellbeing import WellbeingFeedback
 from schemas.wellbeing import WellbeingFeedbackCreate, WellbeingStatsOut
+from services.differential_privacy import budget_summary as dp_budget_summary
 
 router = APIRouter(prefix="/wellbeing", tags=["wellbeing"])
 
@@ -84,6 +85,11 @@ async def get_wellbeing_stats(
         pass
 
     return WellbeingStatsOut(
+        # DP is NOT applied here — this is a self-service query: the authenticated
+        # user is reading their OWN data. DP only protects aggregate/cross-user
+        # queries where an attacker could infer one person's record from a group
+        # result. Applying noise here would corrupt the user's own accurate view
+        # of their usage (and cause values to change on every refresh).
         screen_time_weekly=screen_time_weekly,
         content_breakdown=breakdown,
         mood_trend=mood_trend,
@@ -108,3 +114,46 @@ async def submit_feedback(
     db.add(feedback)
     await db.commit()
     return {"status": "recorded"}
+
+
+@router.get("/dp-info")
+async def get_dp_info():
+    """Return the Differential Privacy configuration for transparency.
+
+    This endpoint documents the mathematical privacy guarantees in place.
+    Users and auditors can use this to verify how their data is protected.
+    No authentication required — this is public transparency information.
+    """
+    budget = dp_budget_summary()
+    return {
+        "differential_privacy_enabled": True,
+        "budget": budget,
+        "protected_fields": {
+            "bias_audit_engagement": {
+                "mechanism": "Laplace",
+                "description": "Noise added to views/likes counts before Pearson correlation in the bias audit. Protects individual post engagement from being inferred via the published report.",
+                "composition": "Parallel (views and likes are independent attributes — total ε = DP_EPSILON)",
+                "endpoint": "GET /bias-audit",
+            },
+            "user_embedding_vector": {
+                "mechanism": "Gaussian",
+                "description": "Gaussian noise added to the 384-dim user profile embedding before it is persisted in the database.",
+                "protects_against": "Membership inference attacks on the stored vector",
+                "endpoint": "Applies on every embedding write (interests update, like/dislike, algorithm reset)",
+            },
+        },
+        "fields_not_protected_and_why": {
+            "screen_time_weekly": (
+                "Self-service query: the authenticated user reads their OWN screen-time records. "
+                "DP is only meaningful for aggregate/cross-user queries where an attacker could "
+                "infer one person's data from a group result. Adding noise here would corrupt "
+                "the user's accurate view of their own usage."
+            ),
+            "content_breakdown": (
+                "Same reason as screen_time_weekly — this is a personal query, not an aggregate."
+            ),
+            "mood_trend": "Self-reported data; the user is the data subject and sole viewer.",
+            "content_embeddings": "Post embeddings describe public content, not private user behaviour.",
+        },
+        "reference": "Dwork & Roth (2014) The Algorithmic Foundations of Differential Privacy",
+    }

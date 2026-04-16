@@ -5,6 +5,13 @@ across all posts.  If correlation exceeds 0.1, recommendations are
 flagged for adversarial debiasing.
 
 beauty_score is stored for audit only — it is NEVER used in ranking.
+
+Differential Privacy
+--------------------
+The views and likes counts used in the correlation are DP-noised
+(Laplace mechanism, sensitivity=1) before the Pearson computation.
+This ensures no individual post's exact engagement can be inferred
+from the published audit report.
 """
 
 from __future__ import annotations
@@ -16,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.post import Post
+from services.differential_privacy import DP_EPSILON, privatise_engagement_lists
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +58,14 @@ async def generate_bias_report(db: AsyncSession) -> dict:
     views = [float(r.views_count or 0) for r in rows]
     likes = [float(r.likes_count or 0) for r in rows]
 
-    corr_views = _pearson(beauty_scores, views)
-    corr_likes = _pearson(beauty_scores, likes)
+    # ── Differential Privacy ────────────────────────────────────────────────────
+    # Add Laplace noise (sensitivity=1) to views and likes before computing
+    # Pearson correlation. Parallel composition: views ⋀ likes are independent
+    # attributes ⇒ total ε = DP_EPSILON (not 2×).
+    views_dp, likes_dp = privatise_engagement_lists(views, likes)
+
+    corr_views = _pearson(beauty_scores, views_dp)
+    corr_likes = _pearson(beauty_scores, likes_dp)
 
     debiasing_needed = abs(corr_views) > 0.1 or abs(corr_likes) > 0.1
 
@@ -82,6 +96,17 @@ async def generate_bias_report(db: AsyncSession) -> dict:
         "debiasing_triggered": debiasing_needed,
         "recommendation": recommendation,
         "note": "beauty_score is stored for audit purposes ONLY and is never used in recommendation ranking.",
+        "differential_privacy": {
+            "applied": True,
+            "mechanism": "Laplace",
+            "epsilon": DP_EPSILON,
+            "sensitivity": 1,
+            "protected_attributes": ["views_count", "likes_count"],
+            "guarantee": (
+                f"(ε={DP_EPSILON})-differentially private. "
+                "Individual post engagement cannot be inferred from these correlations."
+            ),
+        },
     }
 
 

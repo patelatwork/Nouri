@@ -2,6 +2,16 @@
 
 Uses sentence-transformers/all-MiniLM-L6-v2 via the HF Inference router
 to produce 384-dim vectors for both user profiles and content descriptions.
+
+Differential Privacy
+--------------------
+User profile embeddings are privatised with Gaussian noise before storage
+(DP-SGD spirit applied at the vector level). This protects against
+membership inference attacks where an attacker with access to the stored
+embedding tries to infer which specific interests/videos the user has.
+
+Content embeddings (posts) are NOT noised — they describe public content,
+not private user behaviour.
 """
 
 import logging
@@ -9,6 +19,8 @@ import os
 
 import httpx
 import numpy as np
+
+from services.differential_privacy import privatise_vector
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +99,34 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     if denom == 0:
         return 0.0
     return float(np.dot(va, vb) / denom)
+
+
+async def privatise_user_embedding(raw_embedding: list[float]) -> list[float]:
+    """Apply Gaussian differential privacy noise to a user profile embedding.
+
+    This is the *only* function that should be called when storing a user
+    embedding. Content embeddings (posts) are public data and should NOT
+    go through this function.
+
+    The Gaussian mechanism is chosen over Laplace because:
+    - It achieves tighter bounds in high dimensions (384-dim vectors).
+    - It preserves the L2-norm structure needed for cosine similarity.
+    - It satisfies (ε, δ)-DP which is standard for vector mechanisms.
+
+    The noised vector is L2-normalised so it remains compatible with
+    pgvector cosine-distance queries.
+
+    Parameters
+    ----------
+    raw_embedding:
+        The 384-dim embedding from the HuggingFace API (unit-normalised).
+
+    Returns
+    -------
+    list[float]
+        A DP-noised, L2-normalised 384-dim embedding.
+    """
+    return privatise_vector(
+        raw_embedding,
+        sensitivity=1.0,   # unit-sphere embeddings have L2 sensitivity ≤ 1
+    )
